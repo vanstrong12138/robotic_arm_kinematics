@@ -296,7 +296,7 @@ std::vector<double> computeIK(const std::vector<double>& initial_guess,
 ```
 
 ## 使用interactive_marker以实现发布机械臂三维空间目标点
-1. 安装ROS依赖包
+1. 安装ROS2依赖包
 
 ```cpp
 sudo apt install ros-${ROS_DISTRO}-interactive-markers ros-${ROS_DISTRO}-tf2-ros
@@ -360,7 +360,7 @@ cd piper_ros
 2. 启动PIPER真机控制节点
 
 ```cpp
-ros2 launch piper start_single_piper_rviz.launch.py 
+ros2 launch piper my_start_single_piper_rviz.launch.py 
 ```
 
 3. 接下来启动IK节点和`interactive_marker`节点（在同一个launch文件里），可以看到机械臂运动到HOME点
