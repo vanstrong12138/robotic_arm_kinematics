@@ -1,8 +1,4 @@
 #!/usr/bin/env python3
-"""Subscribe target pose, transform by TF, solve continuous IK , publish JointState.
-升级：支持1D QP优化参数配置
-"""
-
 from typing import List, Optional
 
 import numpy as np
@@ -14,13 +10,15 @@ from rclpy.duration import Duration
 from sensor_msgs.msg import JointState
 from tf2_ros import Buffer, TransformException, TransformListener
 
-from ik_solver import ContinuityParams, ContinuityRuntimeState, solve_pose_continuous_with_state
+from ik_solver import (
+    ContinuityParams,
+    ContinuityRuntimeState,
+    solve_pose_continuous_with_state,
+)
 
 
 class IkJointStatePublisher(Node):
-    """Bridge node: interactive marker pose -> IK -> joint_states.
-    升级：支持1D QP优化参数配置
-    """
+    """Bridge node: interactive marker pose -> IK -> joint_states."""
 
     def __init__(self) -> None:
         super().__init__("ik_joint_state_publisher")
@@ -43,7 +41,7 @@ class IkJointStatePublisher(Node):
         self.declare_parameter("enable_global_fallback", True)
         self.declare_parameter("target_to_ik_ee_xyz", [0.0, 0.0, 0.0])
         self.declare_parameter("target_to_ik_ee_rpy", [0.0, 0.0, 0.0])
-        
+
         # 新增1D QP参数
         self.declare_parameter("w_qp_joint_inc", 1.0)
         self.declare_parameter("w_qp_pose_err", 0.5)
@@ -52,27 +50,43 @@ class IkJointStatePublisher(Node):
         self._target_pose_topic = str(self.get_parameter("target_pose_topic").value)
         self._joint_state_topic = str(self.get_parameter("joint_state_topic").value)
         self._ik_base_frame = str(self.get_parameter("ik_base_frame").value)
-        self._default_target_frame = str(self.get_parameter("default_target_frame").value)
+        self._default_target_frame = str(
+            self.get_parameter("default_target_frame").value
+        )
         self._n_psi = int(self.get_parameter("n_psi").value)
         self._republish_rate_hz = float(self.get_parameter("republish_rate_hz").value)
-        self._trajectory_window_size = max(1, int(self.get_parameter("trajectory_window_size").value))
+        self._trajectory_window_size = max(
+            1, int(self.get_parameter("trajectory_window_size").value)
+        )
         xyz = [float(v) for v in self.get_parameter("target_to_ik_ee_xyz").value]
         rpy = [float(v) for v in self.get_parameter("target_to_ik_ee_rpy").value]
         self._T_target_to_ik = self._xyz_rpy_to_transform(xyz, rpy)
-        
+
         # 初始化连续性参数（包含QP权重）
         self._continuity = ContinuityParams()
-        self._continuity.local_theta0_window = float(self.get_parameter("local_theta0_window").value)
-        self._continuity.local_theta0_count = int(self.get_parameter("local_theta0_count").value)
+        self._continuity.local_theta0_window = float(
+            self.get_parameter("local_theta0_window").value
+        )
+        self._continuity.local_theta0_count = int(
+            self.get_parameter("local_theta0_count").value
+        )
         self._continuity.w_vel = float(self.get_parameter("w_vel").value)
         self._continuity.w_acc = float(self.get_parameter("w_acc").value)
         self._continuity.w_pose = float(self.get_parameter("w_pose").value)
         self._continuity.w_theta0 = float(self.get_parameter("w_theta0").value)
-        self._continuity.hysteresis_margin = float(self.get_parameter("hysteresis_margin").value)
-        self._continuity.enable_global_fallback = bool(self.get_parameter("enable_global_fallback").value)
+        self._continuity.hysteresis_margin = float(
+            self.get_parameter("hysteresis_margin").value
+        )
+        self._continuity.enable_global_fallback = bool(
+            self.get_parameter("enable_global_fallback").value
+        )
         # 读取QP权重参数
-        self._continuity.w_qp_joint_inc = float(self.get_parameter("w_qp_joint_inc").value)
-        self._continuity.w_qp_pose_err = float(self.get_parameter("w_qp_pose_err").value)
+        self._continuity.w_qp_joint_inc = float(
+            self.get_parameter("w_qp_joint_inc").value
+        )
+        self._continuity.w_qp_pose_err = float(
+            self.get_parameter("w_qp_pose_err").value
+        )
 
         self._joint_names: List[str] = [
             "joint1",
@@ -113,14 +127,22 @@ class IkJointStatePublisher(Node):
         )
 
     def _on_target_pose(self, msg: PoseStamped) -> None:
-        source_frame = msg.header.frame_id if msg.header.frame_id else self._default_target_frame
+        source_frame = (
+            msg.header.frame_id if msg.header.frame_id else self._default_target_frame
+        )
         T_source_target = self._pose_to_transform(msg.pose)
         if T_source_target is None:
-            self.get_logger().warning("Ignore target pose: invalid quaternion norm too small")
+            self.get_logger().warning(
+                "Ignore target pose: invalid quaternion norm too small"
+            )
             return
 
         try:
-            stamp = Time.from_msg(msg.header.stamp) if (msg.header.stamp.sec or msg.header.stamp.nanosec) else Time()
+            stamp = (
+                Time.from_msg(msg.header.stamp)
+                if (msg.header.stamp.sec or msg.header.stamp.nanosec)
+                else Time()
+            )
             tf_msg = self._tf_buffer.lookup_transform(
                 self._ik_base_frame,
                 source_frame,
@@ -169,7 +191,9 @@ class IkJointStatePublisher(Node):
         self._publish_joint_state(self._last_q, self._ik_base_frame)
 
     @staticmethod
-    def _quat_to_rot(qx: float, qy: float, qz: float, qw: float) -> Optional[np.ndarray]:
+    def _quat_to_rot(
+        qx: float, qy: float, qz: float, qw: float
+    ) -> Optional[np.ndarray]:
         n = qx * qx + qy * qy + qz * qz + qw * qw
         if n < 1e-12:
             return None
@@ -191,7 +215,10 @@ class IkJointStatePublisher(Node):
 
     def _pose_to_transform(self, pose) -> Optional[np.ndarray]:
         R = self._quat_to_rot(
-            pose.orientation.x, pose.orientation.y, pose.orientation.z, pose.orientation.w
+            pose.orientation.x,
+            pose.orientation.y,
+            pose.orientation.z,
+            pose.orientation.w,
         )
         if R is None:
             return None

@@ -1,13 +1,9 @@
-"""
-Tsinghua 论文落地版：可行域（关节限位）内扫描臂角 → 加权限位惩罚下选最优臂角。
-升级：新增1D QP优化，在解析解基础上局部优化关节角
-"""
 import math
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
-from scipy.optimize import minimize_scalar  # 用于1D QP求解
+from scipy.optimize import minimize_scalar
 
 
 def wrap_to_pi(x: np.ndarray) -> np.ndarray:
@@ -19,7 +15,9 @@ def pose_error(T_cur: np.ndarray, T_des: np.ndarray) -> np.ndarray:
     R = T_cur[:3, :3]
     Rd = T_des[:3, :3]
     re = 0.5 * (
-        np.cross(R[:, 0], Rd[:, 0]) + np.cross(R[:, 1], Rd[:, 1]) + np.cross(R[:, 2], Rd[:, 2])
+        np.cross(R[:, 0], Rd[:, 0])
+        + np.cross(R[:, 1], Rd[:, 1])
+        + np.cross(R[:, 2], Rd[:, 2])
     )
     return np.hstack([dp, re])
 
@@ -92,9 +90,13 @@ class NeroParams:
     def default() -> "NeroParams":
         return NeroParams(
             a_prev=np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=float),
-            alpha_prev=np.deg2rad(np.array([0.0, 90.0, 90.0, 90.0, 90.0, 90.0, 90.0], dtype=float)),
+            alpha_prev=np.deg2rad(
+                np.array([0.0, 90.0, 90.0, 90.0, 90.0, 90.0, 90.0], dtype=float)
+            ),
             d_i=np.array([0.138, 0.0, 0.31, 0.0, 0.27, 0.0, 0.0235], dtype=float),
-            theta_offset=np.deg2rad(np.array([0.0, -180.0, -180.0, -180.0, 90.0, 90.0, 0.0], dtype=float)),
+            theta_offset=np.deg2rad(
+                np.array([0.0, -180.0, -180.0, -180.0, 90.0, 90.0, 0.0], dtype=float)
+            ),
             joint_limits=np.array(
                 [
                     [-2.705261, 2.705261],
@@ -129,7 +131,7 @@ class ContinuityParams:
     enable_global_fallback: bool = True
     # 1D QP权重
     w_qp_joint_inc: float = 1.0  # 关节增量权重
-    w_qp_pose_err: float = 0.5   # 位姿误差权重
+    w_qp_pose_err: float = 0.5  # 位姿误差权重
 
 
 @dataclass
@@ -197,7 +199,9 @@ def _extract_567_from_T47_paper(T47: np.ndarray) -> List[np.ndarray]:
     return sols
 
 
-def _solve_q123_from_swe(E: np.ndarray, W: np.ndarray, q4: float, p: NeroParams) -> List[np.ndarray]:
+def _solve_q123_from_swe(
+    E: np.ndarray, W: np.ndarray, q4: float, p: NeroParams
+) -> List[np.ndarray]:
     """
     Solve q1,q2,q3 from elbow point E and wrist center W for MDH NERO chain.
     """
@@ -263,7 +267,9 @@ def _solve_q123_from_swe(E: np.ndarray, W: np.ndarray, q4: float, p: NeroParams)
     return sols
 
 
-def _solve_theta4_from_triangle(S: np.ndarray, W: np.ndarray, p: NeroParams) -> Optional[float]:
+def _solve_theta4_from_triangle(
+    S: np.ndarray, W: np.ndarray, p: NeroParams
+) -> Optional[float]:
     # Paper geometric triangle SEW
     l_sw = float(np.linalg.norm(W - S))
     l_se = abs(float(p.d_i[2]))
@@ -277,7 +283,9 @@ def _solve_theta4_from_triangle(S: np.ndarray, W: np.ndarray, p: NeroParams) -> 
     return math.acos(c4)
 
 
-def _compute_swe_from_target(T07: np.ndarray, p: NeroParams) -> Tuple[np.ndarray, np.ndarray, Optional[float], np.ndarray]:
+def _compute_swe_from_target(
+    T07: np.ndarray, p: NeroParams
+) -> Tuple[np.ndarray, np.ndarray, Optional[float], np.ndarray]:
     """
     Build S-W-E triangle primitives from target pose:
       - S: shoulder center
@@ -306,7 +314,9 @@ def _compute_swe_from_target(T07: np.ndarray, p: NeroParams) -> Tuple[np.ndarray
     return S, W, q4_abs, u_sw
 
 
-def _elbow_from_arm_angle(S: np.ndarray, W: np.ndarray, theta0: float, p: NeroParams) -> Optional[np.ndarray]:
+def _elbow_from_arm_angle(
+    S: np.ndarray, W: np.ndarray, theta0: float, p: NeroParams
+) -> Optional[np.ndarray]:
     """
     Construct elbow point E(theta0) on the SEW circle.
     """
@@ -400,7 +410,9 @@ def _optimal_theta0(
     return best_t
 
 
-def _scan_theta0_solutions(T07: np.ndarray, p: NeroParams, step: float) -> Tuple[List[float], List[Tuple[float, List[np.ndarray]]]]:
+def _scan_theta0_solutions(
+    T07: np.ndarray, p: NeroParams, step: float
+) -> Tuple[List[float], List[Tuple[float, List[np.ndarray]]]]:
     """
     One-pass theta0 sweep:
       - returns feasible theta0 list
@@ -466,8 +478,14 @@ def _best_q_at_theta0_weighted(
     return best_q
 
 
-# ------------------- 新增1D QP优化函数 -------------------
-def _qp_1d_objective(dq: float, idx: int, q_base: np.ndarray, T_target: np.ndarray, p: NeroParams, continuity: ContinuityParams) -> float:
+def _qp_1d_objective(
+    dq: float,
+    idx: int,
+    q_base: np.ndarray,
+    T_target: np.ndarray,
+    p: NeroParams,
+    continuity: ContinuityParams,
+) -> float:
     """
     1D QP目标函数：最小化关节增量 + 位姿误差
     :param dq: 单个关节的增量（优化变量）
@@ -481,26 +499,31 @@ def _qp_1d_objective(dq: float, idx: int, q_base: np.ndarray, T_target: np.ndarr
     # 构造新的关节角
     q_new = q_base.copy()
     q_new[idx] = wrap_to_pi(q_new[idx] + dq)
-    
+
     # 1. 关节限位惩罚（硬约束通过优化边界实现，这里加软惩罚）
     q_min, q_max = p.joint_limits[idx]
     if q_new[idx] < q_min or q_new[idx] > q_max:
         limit_penalty = 1e6 * abs(q_new[idx] - np.clip(q_new[idx], q_min, q_max))
     else:
         limit_penalty = 0.0
-    
+
     # 2. 关节增量代价
-    inc_cost = continuity.w_qp_joint_inc * (dq **2)
-    
+    inc_cost = continuity.w_qp_joint_inc * (dq**2)
+
     # 3. 位姿误差代价
     T_cur = fk(q_new, p)
     pose_err = np.linalg.norm(pose_error(T_cur, T_target))
-    pose_cost = continuity.w_qp_pose_err * (pose_err** 2)
-    
+    pose_cost = continuity.w_qp_pose_err * (pose_err**2)
+
     return inc_cost + pose_cost + limit_penalty
 
 
-def _optimize_q_with_1d_qp(q_init: np.ndarray, T_target: np.ndarray, p: NeroParams, continuity: ContinuityParams) -> np.ndarray:
+def _optimize_q_with_1d_qp(
+    q_init: np.ndarray,
+    T_target: np.ndarray,
+    p: NeroParams,
+    continuity: ContinuityParams,
+) -> np.ndarray:
     """
     对解析解进行1D QP优化（逐关节优化）
     :param q_init: 解析解初始关节角
@@ -516,19 +539,19 @@ def _optimize_q_with_1d_qp(q_init: np.ndarray, T_target: np.ndarray, p: NeroPara
         # 计算当前关节角与限位的距离，限制优化范围
         delta_max = min(0.1, q_max - q_opt[idx])  # 最大正增量（0.1弧度约5.7度）
         delta_min = max(-0.1, q_min - q_opt[idx])  # 最大负增量
-        
+
         # 1D最小化优化
         res = minimize_scalar(
             _qp_1d_objective,
             bounds=(delta_min, delta_max),
             args=(idx, q_opt, T_target, p, continuity),
-            method='bounded'
+            method="bounded",
         )
-        
+
         # 更新关节角（仅当优化成功时）
         if res.success:
             q_opt[idx] = wrap_to_pi(q_opt[idx] + res.x)
-    
+
     return q_opt
 
 
@@ -556,16 +579,18 @@ def ik_arm_angle(
         return None, feasible_theta0
     best_t0 = _optimal_theta0(feasible_theta0, T, p, q_prev)
     q_best = _best_q_at_theta0_weighted(best_t0, T, p, q_prev)
-    
+
     # 新增：1D QP优化
     if q_best is not None:
         continuity = ContinuityParams()  # 使用默认QP权重
         q_best = _optimize_q_with_1d_qp(q_best, T, p, continuity)
-    
+
     return q_best, feasible_theta0
 
 
-def _ik_one_arm_angle(T07: np.ndarray, theta0: float, p: NeroParams) -> List[np.ndarray]:
+def _ik_one_arm_angle(
+    T07: np.ndarray, theta0: float, p: NeroParams
+) -> List[np.ndarray]:
     # Build S-W-E geometric primitives first (paper S-R-S flow).
     S, W_from_pose, q4_abs, _ = _compute_swe_from_target(T07, p)
     E_point = _elbow_from_arm_angle(S, W_from_pose, theta0, p)
@@ -607,9 +632,17 @@ def _ik_one_arm_angle(T07: np.ndarray, theta0: float, p: NeroParams) -> List[np.
                     extra = np.array(
                         [
                             theta0,
-                            S[0], S[1], S[2],
-                            W[0], W[1], W[2],
-                            *(E_point.tolist() if E_point is not None else [np.nan, np.nan, np.nan]),
+                            S[0],
+                            S[1],
+                            S[2],
+                            W[0],
+                            W[1],
+                            W[2],
+                            *(
+                                E_point.tolist()
+                                if E_point is not None
+                                else [np.nan, np.nan, np.nan]
+                            ),
                         ],
                         dtype=float,
                     )
@@ -618,7 +651,9 @@ def _ik_one_arm_angle(T07: np.ndarray, theta0: float, p: NeroParams) -> List[np.
     return q_solutions
 
 
-def _q_from_theta0(theta0: float, T07: np.ndarray, p: NeroParams) -> Optional[np.ndarray]:
+def _q_from_theta0(
+    theta0: float, T07: np.ndarray, p: NeroParams
+) -> Optional[np.ndarray]:
     """
     文档「关节角 → 臂角」逆映射的单支路表示：给定 theta0 取一条在限位内的解析解（7 维）。
     论文中的显式三角式针对特定 DH；本工程统一用 `_ik_one_arm_angle` 的 MDH 几何结果以保证与 FK 一致。
@@ -634,14 +669,18 @@ def _theta0_candidates_from_target(T: np.ndarray, n_psi: int) -> np.ndarray:
     return np.linspace(-math.pi, math.pi, max(31, n_psi), endpoint=True)
 
 
-def _collect_unique_solutions_for_theta0_grid(T: np.ndarray, p: NeroParams, theta0_grid: np.ndarray) -> List[np.ndarray]:
+def _collect_unique_solutions_for_theta0_grid(
+    T: np.ndarray, p: NeroParams, theta0_grid: np.ndarray
+) -> List[np.ndarray]:
     all_solutions: List[np.ndarray] = []
     for theta0 in theta0_grid:
         t = float(wrap_to_pi(np.array([theta0]))[0])
         all_solutions.extend(_ik_one_arm_angle(T, t, p))
     unique_solutions: List[np.ndarray] = []
     for q in all_solutions:
-        if not any(np.linalg.norm(wrap_to_pi(q[:7] - u[:7])) < 1e-4 for u in unique_solutions):
+        if not any(
+            np.linalg.norm(wrap_to_pi(q[:7] - u[:7])) < 1e-4 for u in unique_solutions
+        ):
             unique_solutions.append(q)
     return unique_solutions
 
@@ -663,42 +702,67 @@ def ik_arm_angle_with_report(
     feasible_theta0, cached = _scan_theta0_solutions(T, p, step=step)
 
     if len(feasible_theta0) == 0:
-        return None, [], {
-            "method": "failed",
-            "candidate_count": 0,
-            "pose_err_best": None,
-            "swe_debug": {
-                "S": S_dbg.tolist(),
-                "W": W_dbg.tolist(),
-                "E": [float("nan"), float("nan"), float("nan")],
-                "q4_abs": None if q4_dbg is None else float(q4_dbg),
+        return (
+            None,
+            [],
+            {
+                "method": "failed",
+                "candidate_count": 0,
+                "pose_err_best": None,
+                "swe_debug": {
+                    "S": S_dbg.tolist(),
+                    "W": W_dbg.tolist(),
+                    "E": [float("nan"), float("nan"), float("nan")],
+                    "q4_abs": None if q4_dbg is None else float(q4_dbg),
+                },
             },
-        }
+        )
 
     q_best, q_best_full, best_t0 = _best_weighted_from_cached(cached, p, q_prev)
-    
+
     # 新增：1D QP优化
     if q_best is not None:
         continuity = ContinuityParams()
         q_best = _optimize_q_with_1d_qp(q_best, T, p, continuity)
 
     if q_best is None:
-        return None, [], {
-            "method": "failed",
-            "candidate_count": 0,
-            "pose_err_best": None,
-            "swe_debug": {
-                "S": S_dbg.tolist(),
-                "W": W_dbg.tolist(),
-                "E": [float("nan"), float("nan"), float("nan")],
-                "q4_abs": None if q4_dbg is None else float(q4_dbg),
+        return (
+            None,
+            [],
+            {
+                "method": "failed",
+                "candidate_count": 0,
+                "pose_err_best": None,
+                "swe_debug": {
+                    "S": S_dbg.tolist(),
+                    "W": W_dbg.tolist(),
+                    "E": [float("nan"), float("nan"), float("nan")],
+                    "q4_abs": None if q4_dbg is None else float(q4_dbg),
+                },
             },
-        }
+        )
 
     # 仅保留最优解一条分支，便于与原文接口一致；候选数用可行臂角个数表征
     if q_best_full is None or best_t0 is None:
         q_best_full = np.concatenate(
-            [q_best, np.array([0.0, S_dbg[0], S_dbg[1], S_dbg[2], W_dbg[0], W_dbg[1], W_dbg[2], float("nan"), float("nan"), float("nan")], dtype=float)]
+            [
+                q_best,
+                np.array(
+                    [
+                        0.0,
+                        S_dbg[0],
+                        S_dbg[1],
+                        S_dbg[2],
+                        W_dbg[0],
+                        W_dbg[1],
+                        W_dbg[2],
+                        float("nan"),
+                        float("nan"),
+                        float("nan"),
+                    ],
+                    dtype=float,
+                ),
+            ]
         )
     theta0_best = float(q_best_full[7] if best_t0 is None else best_t0)
     swe_debug = {
@@ -709,14 +773,18 @@ def ik_arm_angle_with_report(
     }
     e_best = float(np.linalg.norm(pose_error(fk(q_best, p), T)))
     all_solutions = [q_best_full]
-    return q_best, all_solutions, {
-        "method": "feasible_region+1DQP",
-        "candidate_count": len(feasible_theta0),
-        "pose_err_best": e_best,
-        "theta0_selected": theta0_best,
-        "feasible_theta0_count": len(feasible_theta0),
-        "swe_debug": swe_debug,
-    }
+    return (
+        q_best,
+        all_solutions,
+        {
+            "method": "feasible_region+1DQP",
+            "candidate_count": len(feasible_theta0),
+            "pose_err_best": e_best,
+            "theta0_selected": theta0_best,
+            "feasible_theta0_count": len(feasible_theta0),
+            "swe_debug": swe_debug,
+        },
+    )
 
 
 def ik_arm_angle_simple(
@@ -725,7 +793,9 @@ def ik_arm_angle_simple(
     q_prev: Optional[np.ndarray] = None,
     n_psi: int = 181,
 ) -> Tuple[Optional[np.ndarray], List[np.ndarray]]:
-    q_best, all_solutions_full, _ = ik_arm_angle_with_report(T_target, p=p, q_prev=q_prev, n_psi=n_psi)
+    q_best, all_solutions_full, _ = ik_arm_angle_with_report(
+        T_target, p=p, q_prev=q_prev, n_psi=n_psi
+    )
     return q_best, [q[:7] for q in all_solutions_full]
 
 
@@ -749,7 +819,9 @@ def solve_trajectory(
     q_list: List[Optional[np.ndarray]] = []
     reports: List[Dict[str, object]] = []
     for T in T_targets:
-        q, _, report = ik_arm_angle_with_report(np.array(T, dtype=float), p=p, q_prev=q_prev, n_psi=n_psi)
+        q, _, report = ik_arm_angle_with_report(
+            np.array(T, dtype=float), p=p, q_prev=q_prev, n_psi=n_psi
+        )
         q_list.append(q)
         reports.append(report)
         if q is not None:
@@ -834,23 +906,33 @@ def solve_pose_continuous_with_state(
         all_solutions = _collect_unique_solutions_for_theta0_grid(T, p, theta0_grid)
 
     if not all_solutions and continuity.enable_global_fallback:
-        q_global, all_full, _ = ik_arm_angle_with_report(T, p=p, q_prev=q_prev, n_psi=n_psi)
+        q_global, all_full, _ = ik_arm_angle_with_report(
+            T, p=p, q_prev=q_prev, n_psi=n_psi
+        )
         all_solutions = all_full
         method = "continuous_global_fallback"
         if q_global is None:
-            return None, {
+            return (
+                None,
+                {
+                    "method": method,
+                    "candidate_count": 0,
+                    "selected_by": "failed",
+                    "pose_err_best": None,
+                },
+                state,
+            )
+    elif not all_solutions:
+        return (
+            None,
+            {
                 "method": method,
                 "candidate_count": 0,
                 "selected_by": "failed",
                 "pose_err_best": None,
-            }, state
-    elif not all_solutions:
-        return None, {
-            "method": method,
-            "candidate_count": 0,
-            "selected_by": "failed",
-            "pose_err_best": None,
-        }, state
+            },
+            state,
+        )
 
     scored = []
     for cand in all_solutions:
@@ -882,7 +964,9 @@ def solve_pose_continuous_with_state(
     selected = best
     selected_by = "best_score"
     if q_lock is not None:
-        lock_item = min(scored, key=lambda x: float(np.linalg.norm(wrap_to_pi(x[5][:7] - q_lock))))
+        lock_item = min(
+            scored, key=lambda x: float(np.linalg.norm(wrap_to_pi(x[5][:7] - q_lock)))
+        )
         if lock_item[0] <= best[0] + continuity.hysteresis_margin:
             selected = lock_item
             selected_by = "hysteresis_locked"
@@ -890,10 +974,10 @@ def solve_pose_continuous_with_state(
     q_best_full = selected[5]
     q_best = q_best_full[:7]
     theta0_best = float(q_best_full[7]) if q_best_full.shape[0] > 7 else None
-    
+
     # 新增：1D QP优化
     q_best = _optimize_q_with_1d_qp(q_best, T, p, continuity)
-    
+
     pose_best = float(np.linalg.norm(pose_error(fk(q_best, p), T)))
 
     next_state = ContinuityRuntimeState(

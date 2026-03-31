@@ -50,7 +50,9 @@ class InteractiveTargetPoseTool(Node):
 
         timer_dt = 1.0 / max(self._publish_rate_hz, 1.0)
         self._timer = self.create_timer(timer_dt, self._publish_pose_timer)
-        self._init_pose_timer = self.create_timer(0.2, self._try_sync_initial_pose_from_tf)
+        self._init_pose_timer = self.create_timer(
+            0.2, self._try_sync_initial_pose_from_tf
+        )
         self.get_logger().info(
             f"Interactive target marker ready. Drag in RViz and read from {self._publish_topic}"
         )
@@ -93,7 +95,9 @@ class InteractiveTargetPoseTool(Node):
         self._current_pose = int_marker.pose
 
     @staticmethod
-    def _make_control(name: str, x: float, y: float, z: float, is_rotate: bool) -> InteractiveMarkerControl:
+    def _make_control(
+        name: str, x: float, y: float, z: float, is_rotate: bool
+    ) -> InteractiveMarkerControl:
         control = InteractiveMarkerControl()
         control.name = name
         control.orientation.w = 1.0
@@ -101,7 +105,9 @@ class InteractiveTargetPoseTool(Node):
         control.orientation.y = y
         control.orientation.z = z
         control.interaction_mode = (
-            InteractiveMarkerControl.ROTATE_AXIS if is_rotate else InteractiveMarkerControl.MOVE_AXIS
+            InteractiveMarkerControl.ROTATE_AXIS
+            if is_rotate
+            else InteractiveMarkerControl.MOVE_AXIS
         )
         return control
 
