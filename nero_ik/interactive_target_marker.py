@@ -65,21 +65,14 @@ class InteractiveTargetPoseTool(Node):
         int_marker.scale = self._marker_scale
         int_marker.pose = self._default_pose
 
-        # Visible sphere body
+        # Visible axis body
         body_control = InteractiveMarkerControl()
         body_control.always_visible = True
         body_control.interaction_mode = InteractiveMarkerControl.NONE
 
-        body = Marker()
-        body.type = Marker.SPHERE
-        body.scale.x = self._marker_scale * 0.35
-        body.scale.y = self._marker_scale * 0.35
-        body.scale.z = self._marker_scale * 0.35
-        body.color.r = 0.2
-        body.color.g = 0.7
-        body.color.b = 1.0
-        body.color.a = 0.9
-        body_control.markers.append(body)
+        body_control.markers.append(self._make_axis_marker("x"))
+        body_control.markers.append(self._make_axis_marker("y"))
+        body_control.markers.append(self._make_axis_marker("z"))
         int_marker.controls.append(body_control)
 
         # 6DoF controls (rotate + move on x/y/z)
@@ -110,6 +103,34 @@ class InteractiveTargetPoseTool(Node):
             else InteractiveMarkerControl.MOVE_AXIS
         )
         return control
+
+    def _make_axis_marker(self, axis: str) -> Marker:
+        marker = Marker()
+        marker.type = Marker.ARROW
+        marker.scale.x = self._marker_scale * 0.45
+        marker.scale.y = self._marker_scale * 0.08
+        marker.scale.z = self._marker_scale * 0.08
+        marker.color.a = 0.95
+
+        if axis == "x":
+            marker.color.r = 1.0
+            marker.color.g = 0.1
+            marker.color.b = 0.1
+            marker.pose.orientation.w = 1.0
+        elif axis == "y":
+            marker.color.r = 0.1
+            marker.color.g = 1.0
+            marker.color.b = 0.1
+            marker.pose.orientation.w = 0.70710678
+            marker.pose.orientation.z = 0.70710678
+        else:
+            marker.color.r = 0.1
+            marker.color.g = 0.3
+            marker.color.b = 1.0
+            marker.pose.orientation.w = 0.70710678
+            marker.pose.orientation.y = -0.70710678
+
+        return marker
 
     def _on_feedback(self, feedback) -> None:
         self._current_pose = feedback.pose

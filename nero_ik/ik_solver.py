@@ -109,7 +109,9 @@ class NeroParams:
                 ],
                 dtype=float,
             ),
-            post_transform_d8=-0.0235,
+            # Expose the solver end-effector as the URDF `link7` origin.
+            # The last MDH link offset `d_i[6]` already models the link6->link7 distance.
+            post_transform_d8=0.0,
             theta0_coarse_divisor=3,
             theta0_fine_count=41,
         )
