@@ -8,11 +8,13 @@ from rclpy.node import Node
 from rclpy.time import Time
 from rclpy.duration import Duration
 from sensor_msgs.msg import JointState
+from std_msgs.msg import String
 from tf2_ros import Buffer, TransformException, TransformListener
 
 from ik_solver import (
     ContinuityParams,
     ContinuityRuntimeState,
+    fk,
     solve_pose_continuous_with_state,
 )
 
@@ -26,6 +28,8 @@ class IkJointStatePublisher(Node):
         # 原有参数
         self.declare_parameter("target_pose_topic", "/ik_target_pose")
         self.declare_parameter("joint_state_topic", "/joint_states")
+        self.declare_parameter("fk_pose_topic", "/ik_fk_pose")
+        self.declare_parameter("fk_state_topic", "/ik_fk_state")
         self.declare_parameter("ik_base_frame", "base_link")
         self.declare_parameter("default_target_frame", "base_link")
         self.declare_parameter("n_psi", 181)
@@ -49,6 +53,8 @@ class IkJointStatePublisher(Node):
         # 读取原有参数
         self._target_pose_topic = str(self.get_parameter("target_pose_topic").value)
         self._joint_state_topic = str(self.get_parameter("joint_state_topic").value)
+        self._fk_pose_topic = str(self.get_parameter("fk_pose_topic").value)
+        self._fk_state_topic = str(self.get_parameter("fk_state_topic").value)
         self._ik_base_frame = str(self.get_parameter("ik_base_frame").value)
         self._default_target_frame = str(
             self.get_parameter("default_target_frame").value
@@ -100,9 +106,13 @@ class IkJointStatePublisher(Node):
 
         self._q_prev = np.zeros(7, dtype=float)
         self._last_q: Optional[np.ndarray] = None
+        self._last_fk_pose: Optional[PoseStamped] = None
+        self._last_fk_state: Optional[String] = None
         self._continuity_state = ContinuityRuntimeState(q_prev=self._q_prev.copy())
 
         self._joint_pub = self.create_publisher(JointState, self._joint_state_topic, 10)
+        self._fk_pose_pub = self.create_publisher(PoseStamped, self._fk_pose_topic, 10)
+        self._fk_state_pub = self.create_publisher(String, self._fk_state_topic, 10)
         self._tf_buffer = Buffer()
         self._tf_listener = TransformListener(self._tf_buffer, self)
         self._target_sub = self.create_subscription(
@@ -115,6 +125,11 @@ class IkJointStatePublisher(Node):
         # 完善日志输出
         self.get_logger().info(
             f"IK bridge : {self._target_pose_topic} -> IK(1D QP) -> {self._joint_state_topic}"
+        )
+        self.get_logger().info(f"FK pose publish topic: {self._fk_pose_topic}")
+        self.get_logger().info(
+            f"FK state publish topic: {self._fk_state_topic} "
+            "(human readable text with position + Euler XYZ extrinsic rad/deg)"
         )
         self.get_logger().info(
             f"IK base frame: {self._ik_base_frame}, default target frame: {self._default_target_frame}"
@@ -174,6 +189,7 @@ class IkJointStatePublisher(Node):
         self._q_prev = q_best_np
         self._last_q = q_best_np
         self._publish_joint_state(q_best, self._ik_base_frame)
+        self._publish_fk_pose(q_best_np, self._ik_base_frame)
 
     def _publish_joint_state(self, q: np.ndarray, frame_id: str) -> None:
         out = JointState()
@@ -189,6 +205,42 @@ class IkJointStatePublisher(Node):
         if self._last_q is None:
             return
         self._publish_joint_state(self._last_q, self._ik_base_frame)
+        if self._last_fk_pose is not None:
+            self._last_fk_pose.header.stamp = self.get_clock().now().to_msg()
+            self._fk_pose_pub.publish(self._last_fk_pose)
+        if self._last_fk_state is not None:
+            self._fk_state_pub.publish(self._last_fk_state)
+
+    def _publish_fk_pose(self, q: np.ndarray, frame_id: str) -> None:
+        T = fk(np.array(q, dtype=float).reshape(7))
+        p = T[:3, 3]
+        R = T[:3, :3]
+        quat = self._rot_to_quat(T[:3, :3])
+        euler_xyz_ext = self._rot_to_euler_xyz_extrinsic(R)
+
+        msg = PoseStamped()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = frame_id if frame_id else self._ik_base_frame
+        msg.pose.position.x = float(p[0])
+        msg.pose.position.y = float(p[1])
+        msg.pose.position.z = float(p[2])
+        msg.pose.orientation.x = float(quat[0])
+        msg.pose.orientation.y = float(quat[1])
+        msg.pose.orientation.z = float(quat[2])
+        msg.pose.orientation.w = float(quat[3])
+        self._fk_pose_pub.publish(msg)
+        self._last_fk_pose = msg
+
+        euler_xyz_ext_deg = np.rad2deg(euler_xyz_ext)
+        state_msg = String()
+        state_msg.data = (
+            f"frame={msg.header.frame_id}; "
+            f"pos[m]=({float(p[0]):.6f}, {float(p[1]):.6f}, {float(p[2]):.6f}); "
+            f"euler_xyz_ext[rad]=({float(euler_xyz_ext[0]):.6f}, {float(euler_xyz_ext[1]):.6f}, {float(euler_xyz_ext[2]):.6f}); "
+            f"euler_xyz_ext[deg]=({float(euler_xyz_ext_deg[0]):.3f}, {float(euler_xyz_ext_deg[1]):.3f}, {float(euler_xyz_ext_deg[2]):.3f})"
+        )
+        self._fk_state_pub.publish(state_msg)
+        self._last_fk_state = state_msg
 
     @staticmethod
     def _quat_to_rot(
@@ -212,6 +264,56 @@ class IkJointStatePublisher(Node):
         R[2, 1] = yz + wx
         R[2, 2] = 1.0 - (xx + yy)
         return R
+
+    @staticmethod
+    def _rot_to_quat(R: np.ndarray) -> np.ndarray:
+        tr = float(R[0, 0] + R[1, 1] + R[2, 2])
+        if tr > 0.0:
+            s = np.sqrt(tr + 1.0) * 2.0
+            qw = 0.25 * s
+            qx = (R[2, 1] - R[1, 2]) / s
+            qy = (R[0, 2] - R[2, 0]) / s
+            qz = (R[1, 0] - R[0, 1]) / s
+        elif R[0, 0] > R[1, 1] and R[0, 0] > R[2, 2]:
+            s = np.sqrt(1.0 + R[0, 0] - R[1, 1] - R[2, 2]) * 2.0
+            qw = (R[2, 1] - R[1, 2]) / s
+            qx = 0.25 * s
+            qy = (R[0, 1] + R[1, 0]) / s
+            qz = (R[0, 2] + R[2, 0]) / s
+        elif R[1, 1] > R[2, 2]:
+            s = np.sqrt(1.0 + R[1, 1] - R[0, 0] - R[2, 2]) * 2.0
+            qw = (R[0, 2] - R[2, 0]) / s
+            qx = (R[0, 1] + R[1, 0]) / s
+            qy = 0.25 * s
+            qz = (R[1, 2] + R[2, 1]) / s
+        else:
+            s = np.sqrt(1.0 + R[2, 2] - R[0, 0] - R[1, 1]) * 2.0
+            qw = (R[1, 0] - R[0, 1]) / s
+            qx = (R[0, 2] + R[2, 0]) / s
+            qy = (R[1, 2] + R[2, 1]) / s
+            qz = 0.25 * s
+        q = np.array([qx, qy, qz, qw], dtype=float)
+        n = np.linalg.norm(q)
+        if n < 1e-12:
+            return np.array([0.0, 0.0, 0.0, 1.0], dtype=float)
+        return q / n
+
+    @staticmethod
+    def _rot_to_euler_xyz_extrinsic(R: np.ndarray) -> np.ndarray:
+        # Extrinsic XYZ (fixed axes X->Y->Z), equivalent matrix form:
+        # R = Rz(gamma) @ Ry(beta) @ Rx(alpha)
+        # Return [alpha_x, beta_y, gamma_z].
+        sy = np.sqrt(R[0, 0] * R[0, 0] + R[1, 0] * R[1, 0])
+        singular = sy < 1e-8
+        if not singular:
+            alpha_x = np.arctan2(R[2, 1], R[2, 2])
+            beta_y = np.arctan2(-R[2, 0], sy)
+            gamma_z = np.arctan2(R[1, 0], R[0, 0])
+        else:
+            alpha_x = np.arctan2(-R[1, 2], R[1, 1])
+            beta_y = np.arctan2(-R[2, 0], sy)
+            gamma_z = 0.0
+        return np.array([alpha_x, beta_y, gamma_z], dtype=float)
 
     def _pose_to_transform(self, pose) -> Optional[np.ndarray]:
         R = self._quat_to_rot(
